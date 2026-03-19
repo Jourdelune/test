@@ -1,0 +1,6 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "generalist": "./agent.py:make_graph"
+  }
+}
