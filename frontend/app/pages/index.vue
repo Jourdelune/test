@@ -9,7 +9,7 @@ const input = ref("");
 const editingId = ref<string | null>(null);
 const editText = ref("");
 
-const rawUrl = "http://localhost:2025";
+const rawUrl = "http://localhost:2024";
 const threadId = ref<string | null>(null);
 
 const stream = useStream<{ messages: any[] }>({
@@ -24,6 +24,7 @@ const stream = useStream<{ messages: any[] }>({
 });
 
 const streamedMessages = computed(() => stream.messages.value as UIMessage[]);
+const history = stream.history ?? [];
 const loading = computed(() => stream.isLoading.value);
 
 function getMessageText(msg: UIMessage): string {
@@ -58,9 +59,22 @@ function cancelEdit() {
   editText.value = "";
 }
 
+function getFirstCheckpointByMessageId(messageId: string) {
+  if (!history.value) return null;
+
+  for (const cp of history.value) {
+    const messages = (cp.values?.messages ?? []) as any[];
+
+    if (messages.some((m) => m.id === messageId)) {
+      return cp; 
+    }
+  }
+
+  return null;
+}
+
 function handleEdit(msg: UIMessage) {
   if (stream.isLoading.value) return;
-  const parentCheckpoint = getParentCheckpoint(msg);
   const newContent = editText.value.trim();
 
   if (!newContent) {
@@ -68,25 +82,28 @@ function handleEdit(msg: UIMessage) {
     return;
   }
 
+  const checkpoint = getFirstCheckpointByMessageId(msg.id!);
+  if (!checkpoint) {
+    console.log("No checkpoint found for message:", msg);
+    cancelEdit();
+    return;
+  }
+
+  console.log("Submitting edit with checkpoint:", checkpoint);
+
   cancelEdit();
-  console.log("Editing with checkpoint:", parentCheckpoint);
   stream.submit(
     { messages: [{ ...msg, content: newContent }] },
-    { checkpoint: parentCheckpoint },
+    { checkpoint: checkpoint },
   );
 }
 
 function handleRegenerate(messageId: string) {
   if (stream.isLoading.value) return;
-  const msgIndex = streamedMessages.value.findIndex((m) => m.id === messageId);
-  if (msgIndex === -1) return;
-
-  const userMsgIndex = streamedMessages.value.findLastIndex(
-    (m, i) => i < msgIndex && HumanMessage.isInstance(m),
-  );
-  if (userMsgIndex === -1) return;
-
-  const checkpoint = getParentCheckpoint(streamedMessages.value[userMsgIndex]);
+  const msg = streamedMessages.value.find((m) => m.id === messageId);
+  if (!msg) return;
+  console.log("Found message for regenerate:", msg);
+  const checkpoint = getParentCheckpoint(msg);
   if (!checkpoint) {
     console.log("No checkpoint found for regenerate");
     return;
@@ -129,6 +146,9 @@ function handleStop() {
         </div>
 
         <div v-for="msg in streamedMessages" :key="msg.id" class="space-y-2">
+          <p>
+            (checkpoint {{ stream.getMessagesMetadata(msg)?.firstSeenState?.parent_checkpoint?.checkpoint_id }})
+          </p>
           <div v-if="editingId === msg.id" class="flex justify-end">
             <div class="max-w-[80%] space-y-2">
               <textarea
