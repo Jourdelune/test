@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useStream } from "@langchain/vue";
-import { HumanMessage, AIMessage } from "langchain";
-import type { UIMessage } from "ai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
 import { PencilIcon, RotateCwIcon, SendIcon, SquareIcon } from "lucide-vue-next";
 
 const input = ref("");
@@ -23,10 +23,10 @@ const stream = useStream<{ messages: any[] }>({
   },
 });
 
-const streamedMessages = computed(() => stream.messages.value as UIMessage[]);
+const streamedMessages = computed(() => stream.messages.value as BaseMessage[]);
 const loading = computed(() => stream.isLoading.value);
 
-function getMessageText(msg: UIMessage): string {
+function getMessageText(msg: BaseMessage): string {
   if ("text" in msg && typeof msg.text === "string") {
     return msg.text;
   }
@@ -35,21 +35,21 @@ function getMessageText(msg: UIMessage): string {
     if (Array.isArray(msg.content)) {
       return msg.content
         .filter((b) => b.type === "text")
-        .map((b: any) => b.text ?? "")
+        .map((b: { type: string; text?: string }) => b.text ?? "")
         .join("");
     }
   }
   return "";
 }
 
-function getParentCheckpoint(msg: UIMessage) {
+function getParentCheckpoint(msg: BaseMessage) {
   const meta = stream.getMessagesMetadata(msg);
   return meta?.firstSeenState?.parent_checkpoint;
 }
 
-function startEdit(msg: UIMessage) {
+function startEdit(msg: BaseMessage) {
   if (stream.isLoading.value) return;
-  editingId.value = msg.id;
+  editingId.value = msg.id ?? null;
   editText.value = getMessageText(msg);
 }
 
@@ -58,7 +58,7 @@ function cancelEdit() {
   editText.value = "";
 }
 
-function handleEdit(msg: UIMessage) {
+function handleEdit(msg: BaseMessage) {
   if (stream.isLoading.value) return;
   const parentCheckpoint = getParentCheckpoint(msg);
   const newContent = editText.value.trim();
@@ -78,15 +78,10 @@ function handleEdit(msg: UIMessage) {
 
 function handleRegenerate(messageId: string) {
   if (stream.isLoading.value) return;
-  const msgIndex = streamedMessages.value.findIndex((m) => m.id === messageId);
-  if (msgIndex === -1) return;
+  const msg = streamedMessages.value.find((m) => m.id === messageId);
+  if (!msg) return;
 
-  const userMsgIndex = streamedMessages.value.findLastIndex(
-    (m, i) => i < msgIndex && HumanMessage.isInstance(m),
-  );
-  if (userMsgIndex === -1) return;
-
-  const checkpoint = getParentCheckpoint(streamedMessages.value[userMsgIndex]);
+  const checkpoint = getParentCheckpoint(msg);
   if (!checkpoint) {
     console.log("No checkpoint found for regenerate");
     return;
